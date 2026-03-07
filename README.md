@@ -76,7 +76,7 @@ A pure Python HTML5 parser that just works. No C extensions to compile. No syste
 
 | Tool | HTML5 parsing [1][2] | Speed | Query API | Sanitizes output | Notes |
 |------|------------------------------------------|-------|----------|------------------|-------|
-| **JustHTML**<br>Pure Python | ✅&nbsp;**100%** | ⚡ Fast | ✅ CSS selectors | ✅ Built-in (`safe=True`) | Correct, easy to install, and fast enough. |
+| **JustHTML**<br>Pure Python | ✅&nbsp;**100%** | ⚡ Fast | ✅ CSS selectors | ✅ Built-in (`sanitize=True`) | Correct, easy to install, and fast enough. |
 | **Chromium**<br>browser engine | ✅ **99%** | 🚀&nbsp;Very&nbsp;Fast | — | — | — |
 | **WebKit**<br>browser engine | ✅ **98%** | 🚀 Very Fast | — | — | — |
 | **Firefox**<br>browser engine | ✅ **97%** | 🚀 Very Fast | — | — | — |
