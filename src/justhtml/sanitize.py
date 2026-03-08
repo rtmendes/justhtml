@@ -469,6 +469,7 @@ DEFAULT_POLICY: SanitizationPolicy = SanitizationPolicy(
         "li",
         # Tables
         "table",
+        "caption",
         "thead",
         "tbody",
         "tfoot",

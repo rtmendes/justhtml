@@ -191,6 +191,18 @@ class TestSanitizeDom(unittest.TestCase):
         assert out is root
         assert [child.name for child in (root.children or [])] == ["b"]
 
+    def test_sanitize_dom_default_policy_keeps_table_caption(self) -> None:
+        root = DocumentFragment()
+        table = Node("table")
+        caption = Node("caption")
+        caption.append_child(Text("Summary"))
+        table.append_child(caption)
+        root.append_child(table)
+
+        out = sanitize_dom(root)
+        assert out is root
+        assert to_html(root, pretty=False) == "<table><caption>Summary</caption></table>"
+
     def test_sanitize_dom_compiled_cache_reuse(self) -> None:
         policy = SanitizationPolicy(
             allowed_tags=["b"],
