@@ -6,87 +6,123 @@ A pure Python HTML5 parser that just works. No C extensions to compile. No syste
 
 ## Why use JustHTML?
 
-- **Just... Correct ✅** — Spec-perfect HTML5 parsing with browser-grade error recovery — passes the official 9k+ [html5lib-tests](https://github.com/html5lib/html5lib-tests) suite, with 100% line+branch coverage. ([Correctness](docs/correctness.md))
+### Just... Correct ✅
 
-  ```python
-  JustHTML("<p><b>Hi<i>there</b>!", fragment=True).to_html(pretty=False)
-  # => <p><b>Hi<i>there</i></b><i>!</i></p>
+Spec-perfect HTML5 parsing with browser-grade error recovery. Passes the official 9k+ [html5lib-tests](https://github.com/html5lib/html5lib-tests) suite, with 100% line+branch coverage. ([Correctness](docs/correctness.md))
 
-  # Note: fragment=True parses snippets (no <html>/<body> needed)
-  ```
+```python
+JustHTML("<p><b>Hi<i>there</b>!", fragment=True).to_html(pretty=False)
+# => <p><b>Hi<i>there</i></b><i>!</i></p>
+```
 
+**Note**: `fragment=True` parses snippets (no `<html>`/`<body>` needed).
 
-- **Just... Python 🐍** — Pure Python, zero dependencies — no C extensions or system libraries, easy to debug, and works anywhere Python runs, including PyPy and Pyodide. ([Run in the browser](https://emilstenstrom.github.io/justhtml/playground/))
+### Just... Secure 🔒
 
-  ```bash
-  python -m pip show justhtml | grep -E '^Requires:'
-  # Requires: [intentionally left blank]
-  ```
+Safe-by-default sanitization at construction time. Built-in Bleach-style allowlist sanitization on `JustHTML(...)` (disable with `sanitize=False`). Can sanitize inline CSS rules. ([Sanitization & Security](docs/sanitization.md))
 
-- **Just... Secure 🔒** — Safe-by-default sanitization at construction time — built-in Bleach-style allowlist sanitization on `JustHTML(...)` (disable with `sanitize=False`). Can sanitize inline CSS rules. ([Sanitization & Security](docs/sanitization.md))
+```python
+JustHTML(
+    "<p>Hello<script>alert(1)</script> "
+    "<a href=\"javascript:alert(1)\">bad</a> "
+    "<a href=\"https://example.com/?a=1&b=2\">ok</a></p>",
+    fragment=True,
+).to_html()
+# => <p>Hello <a>bad</a> <a href="https://example.com/?a=1&amp;b=2">ok</a></p>
+```
 
-  ```python
-  JustHTML(
-      "<p>Hello<script>alert(1)</script> "
-      "<a href=\"javascript:alert(1)\">bad</a> "
-      "<a href=\"https://example.com/?a=1&b=2\">ok</a></p>",
-      fragment=True,
-  ).to_html()
-  # => <p>Hello <a>bad</a> <a href="https://example.com/?a=1&amp;b=2">ok</a></p>
-  ```
+### Just... Query 🔍
 
-- **Just... Query 🔍** — CSS selectors out of the box — one method (`query()`), familiar syntax (combinators, groups, pseudo-classes), and plain Python nodes as results. ([CSS Selectors](docs/selectors.md))
+CSS selectors out of the box. Two methods (`query()`, `query_one()`), familiar syntax (combinators, groups, pseudo-classes), and plain Python nodes as results. ([CSS Selectors](docs/selectors.md))
 
-  ```python
-  JustHTML(
-      "<div><p class=\"x\">Hi</p><p>Bye</p></div>",
-      fragment=True,
-  ).query_one("div p.x").to_html(pretty=False)
-  # => <p class="x">Hi</p>
-  ```
+```python
+JustHTML(
+    "<div><p class=\"x\">Hi</p><p>Bye</p></div>",
+    fragment=True,
+).query_one("div p.x").to_html(pretty=False)
+# => <p class="x">Hi</p>
+```
 
-- **Just... Transform 🏗️** — Built-in DOM transforms for: drop/unwrap nodes, rewrite attributes, linkify text, and compose safe pipelines. ([Transforms](docs/transforms.md))
+⚠️ **Note**: Sanitization happens before querying, so remember to disable (`sanitize=False`) if you are working with safe HTML.
 
-  ```python
-  from justhtml import JustHTML, Linkify, SetAttrs, Unwrap
+### Just... Transform 🏗️
 
-  doc = JustHTML(
-      "<p>Hello <span class=\"x\">world</span> example.com</p>",
-      transforms=[
-          Unwrap("span.x"),
-          Linkify(),
-          SetAttrs("a", rel="nofollow"),
-      ],
-      fragment=True,
-      safe=False,
-  )
-  print(doc.to_html(pretty=False))
-  # => <p>Hello world <a href="http://example.com" rel="nofollow">example.com</a></p>
-  ```
+Built-in DOM transforms for dropping and unwrapping nodes, rewriting attributes, linkifying text, and composing safe pipelines. ([Transforms](docs/transforms.md))
 
-- **Just... Fast Enough ⚡** — Fast for the common case (fastest pure-Python HTML5 parser available); for terabytes, use a C/Rust parser like `html5ever`. ([Benchmarks](benchmarks/performance.py))
+```python
+from justhtml import JustHTML, Linkify, SetAttrs, Unwrap
 
-  ```bash
-  /usr/bin/time -f '%e s' bash -lc \
-    "curl -Ls https://en.wikipedia.org/wiki/HTML | python -m justhtml - > /dev/null"
-  # 0.41 s
-  ```
+doc = JustHTML(
+    "<p>Hello <span class=\"x\">world</span> example.com</p>",
+    transforms=[
+        Unwrap("span.x"),
+        Linkify(),
+        SetAttrs("a", rel="nofollow"),
+    ],
+    fragment=True,
+    safe=False,
+)
+print(doc.to_html(pretty=False))
+# => <p>Hello world <a href="http://example.com" rel="nofollow">example.com</a></p>
+```
+
+### Just... Build 🧱
+
+Build node trees directly when Python is driving the HTML, then normalize them through the same HTML5 parser. ([Building HTML](docs/building.md))
+
+```python
+from justhtml import JustHTML
+from justhtml.builder import element
+
+doc = JustHTML(
+    element(
+        "article",
+        {"class": "post"},
+        element("h2", "JustHTML"),
+        element("p", "Build nodes directly."),
+        element("a", {"href": "/docs"}, "Read docs"),
+    ),
+    fragment=True,
+    sanitize=False,
+)
+print(doc.to_html(pretty=False))
+# => <article class="post"><h2>JustHTML</h2><p>Build nodes directly.</p><a href="/docs">Read docs</a></article>
+```
+
+### Just... Python 🐍
+
+Pure Python, zero dependencies. No C extensions or system libraries, easy to debug, and works anywhere Python runs, including PyPy and Pyodide. ([Run in the browser](https://emilstenstrom.github.io/justhtml/playground/))
+
+```bash
+python -m pip show justhtml | grep -E '^Requires:'
+# Requires: [intentionally left blank]
+```
+
+### Just... Fast Enough ⚡
+
+Fast for the common case, and the fastest pure-Python HTML5 parser available. For terabytes, use a C/Rust parser like `html5ever`. ([Benchmarks](benchmarks/performance.py))
+
+```bash
+curl -Ls https://en.wikipedia.org/wiki/HTML -o /tmp/justhtml-bench.html
+/usr/bin/time -f '%e s' python -m justhtml /tmp/justhtml-bench.html > /dev/null
+# 0.22 s
+```
 
 ## Comparison
 
-| Tool | HTML5 parsing [1][2] | Speed | Query API | Sanitizes output | Notes |
-|------|------------------------------------------|-------|----------|------------------|-------|
-| **JustHTML**<br>Pure Python | ✅&nbsp;**100%** | ⚡ Fast | ✅ CSS selectors | ✅ Built-in (`sanitize=True`) | Correct, easy to install, and fast enough. |
-| **Chromium**<br>browser engine | ✅ **99%** | 🚀&nbsp;Very&nbsp;Fast | — | — | — |
-| **WebKit**<br>browser engine | ✅ **98%** | 🚀 Very Fast | — | — | — |
-| **Firefox**<br>browser engine | ✅ **97%** | 🚀 Very Fast | — | — | — |
-| **`markupever`**<br>Python wrapper of Rust-based html5ever | ✅ **95%** | 🚀 Very Fast | ✅ CSS selectors | ❌ Needs sanitization | Fast and correct. |
-| **`html5lib`**<br>Pure Python | 🟡 88% | 🐢 Slow | 🟡 XPath (lxml) | 🔴 [Deprecated](https://github.com/html5lib/html5lib-python/issues/443) | Unmaintained. Reference implementation;  Correct but quite slow. |
-| **`html5_parser`**<br>Python wrapper of C-based Gumbo | 🟡 84% | 🚀 Very Fast | 🟡 XPath (lxml) | ❌ Needs sanitization | Fast and mostly correct. |
-| **`selectolax`**<br>Python wrapper of C-based Lexbor | 🟡 68% | 🚀 Very Fast | ✅ CSS selectors | ❌ Needs sanitization | Very fast but less compliant. |
-| **`BeautifulSoup`**<br>Pure Python | 🔴 5% (default) | 🐢 Slow | 🟡 Custom API | ❌ Needs sanitization | Wraps `html.parser` (default). Can use lxml or html5lib. |
-| **`html.parser`**<br>Python stdlib | 🔴 4% | ⚡ Fast | ❌ None | ❌ Needs sanitization | Standard library. Chokes on malformed HTML. |
-| **`lxml`**<br>Python wrapper of C-based libxml2 | 🔴 3% | 🚀 Very Fast | 🟡 XPath | ❌ Needs sanitization | Fast but not HTML5 compliant. Don't use the old lxml.html.clean module! |
+| Tool | HTML5 parsing [1][2] | Speed | Query | Build | Sanitize | Notes |
+|------|------------------------------------------|-------|----------|-------|------------------|-------|
+| **JustHTML**<br>Pure Python | ✅&nbsp;**100%** | ⚡ Fast | ✅ CSS selectors | ✅ `element()` | ✅ Built-in | Correct, secure, easy to install, and fast enough. |
+| **Chromium**<br>browser engine | ✅ **99%** | 🚀&nbsp;Very&nbsp;Fast | — | — | — | — |
+| **WebKit**<br>browser engine | ✅ **98%** | 🚀 Very Fast | — | — | — | — |
+| **Firefox**<br>browser engine | ✅ **97%** | 🚀 Very Fast | — | — | — | — |
+| **`markupever`**<br>Python wrapper of Rust-based html5ever | ✅ **95%** | 🚀 Very Fast | ✅ CSS selectors | ✅ `TreeDom. create_*()` | ❌ Needs sanitization | Fast and correct. |
+| **`html5lib`**<br>Pure Python | 🟡 88% | 🐢 Slow | 🟡 XPath (lxml) | 🟡 Tree API | 🔴 [Deprecated](https://github.com/html5lib/html5lib-python/issues/443) | Unmaintained. Reference implementation; Correct but quite slow. |
+| **`html5_parser`**<br>Python wrapper of C-based Gumbo | 🟡 84% | 🚀 Very Fast | 🟡 XPath (lxml) | 🟡 `etree` (lxml) | ❌ Needs sanitization | Fast and mostly correct. |
+| **`selectolax`**<br>Python wrapper of C-based Lexbor | 🟡 68% | 🚀 Very Fast | ✅ CSS selectors | ✅ `create_node()` | ❌ Needs sanitization | Very fast but less compliant. |
+| **`BeautifulSoup`**<br>Pure Python | 🔴 5% (default) | 🐢 Slow | 🟡 Custom API | ✅ `new_tag()` API | ❌ Needs sanitization | Wraps `html.parser` (default). Can use lxml or html5lib. |
+| **`html.parser`**<br>Python stdlib | 🔴 4% | ⚡ Fast | ❌ None | ❌ None | ❌ Needs sanitization | Standard library. Chokes on malformed HTML. |
+| **`lxml`**<br>Python wrapper of C-based libxml2 | 🔴 3% | 🚀 Very Fast | 🟡 XPath | ✅ `etree` / E-factory | ❌ Needs sanitization | Fast but not HTML5 compliant. Don't use the old lxml.html.clean module! |
 
 [1]: Parser compliance scores are from a strict run of the [html5lib-tests](https://github.com/html5lib/html5lib-tests) tree-construction fixtures (1,743 non-script tests). See [docs/correctness.md](docs/correctness.md) for details.
 
