@@ -43,6 +43,11 @@ class TestSerialize(unittest.TestCase):
         output = doc.to_html(pretty=False)
         assert output == "<html><head></head><body><p>Hi</p></body></html>"
 
+    def test_safe_document_serialization_preserves_doctype(self):
+        doc = JustHTML("<!DOCTYPE html><html><head></head><body><p>Hi</p></body></html>")
+        output = doc.to_html(pretty=False)
+        assert output == "<!DOCTYPE html><html><head></head><body><p>Hi</p></body></html>"
+
     def test_fragment_parameter_default_context(self):
         doc = JustHTML("<p>Hi</p>", fragment=True)
         assert doc.root.name == "#document-fragment"

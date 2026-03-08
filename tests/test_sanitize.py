@@ -1475,6 +1475,11 @@ class TestSanitizeDom(unittest.TestCase):
         assert to_html(sanitize(c), pretty=False) == ""
         assert to_html(sanitize(d), pretty=False) == ""
 
+    def test_default_document_policy_keeps_doctype(self) -> None:
+        doc = JustHTML("<!DOCTYPE html><html><head></head><body><p>Hi</p></body></html>", sanitize=False)
+        out = sanitize(doc.root)
+        assert to_html(out, pretty=False) == "<!DOCTYPE html><html><head></head><body><p>Hi</p></body></html>"
+
         def test_sanitize_default_policy_differs_for_document_vs_fragment(self) -> None:
             root = JustHTML("<p>Hi</p>").root
             out = sanitize(root)

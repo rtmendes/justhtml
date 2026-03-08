@@ -38,7 +38,7 @@ class TestSanitizeTransform(unittest.TestCase):
         # Sanitize runs again after SetAttrs introduced a new unsafe URL.
         assert doc.to_html(pretty=False) == "<p><a>t</a></p>"
 
-    def test_sanitize_drops_comments_doctype_and_unsafe_content(self) -> None:
+    def test_sanitize_drops_comments_and_unsafe_content_but_keeps_document_doctype(self) -> None:
         html = """<!doctype html>
         <!--c-->
         <div class="ok" id="x" title="t" lang="en" dir="ltr"></div>
@@ -61,7 +61,7 @@ class TestSanitizeTransform(unittest.TestCase):
             if tc is not None:
                 stack.append(tc)
         assert "#comment" not in seen
-        assert "!doctype" not in seen
+        assert "!doctype" in seen
 
         div1 = doc.root.query("div")[0]
         assert div1.attrs == {"class": "ok", "id": "x", "title": "t", "lang": "en", "dir": "ltr"}
