@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-03-08
+
+### Added
+- Builder: Add `justhtml.builder` with explicit `element()`, `text()`, `comment()`, and `doctype()` factories for programmatic HTML construction.
+- Parser: Allow `JustHTML(...)` to accept built nodes directly and normalize them through the existing HTML5 parser.
+- Docs: Add a dedicated [Building HTML](docs/building.md) guide and expand the API/README documentation around programmatic HTML generation.
+
+### Changed
+- Sanitization: Preserve doctypes by default in document mode.
+- Sanitization: Add `<caption>` to the default allowed tag set.
+- Typing: Normalize `SanitizationPolicy.allowed_tags` to `frozenset[str]`, improving type safety when composing policies.
+
+### Fixed
+- Builder & Serialization: Preserve arbitrary doctype names and identifiers across build/serialize/parse round-trips.
+- Builder: Reject unsupported namespaces up front; builder namespaces are limited to HTML, SVG, and MathML.
+
 ## [1.8.0] - 2026-03-05
 
 ### Added
