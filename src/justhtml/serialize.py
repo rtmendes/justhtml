@@ -15,6 +15,7 @@ from .constants import FOREIGN_ATTRIBUTE_ADJUSTMENTS, SPECIAL_ELEMENTS, VOID_ELE
 # Note: This matches the logic of the previous loop-based implementation.
 # It checks for space characters, quotes, equals sign, and greater-than.
 _UNQUOTED_ATTR_VALUE_INVALID = re.compile(r'[ \t\n\f\r"\'=>]')
+_LITERAL_TEXT_SERIALIZATION_ELEMENTS = frozenset({"script", "style"})
 
 
 class HTMLContext(str, Enum):
@@ -37,6 +38,14 @@ def _escape_text(text: str | None) -> str:
         return text
     # Minimal, but matches html5lib serializer expectations in core cases.
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _serialize_text_for_parent(text: str | None, parent_name: str | None) -> str:
+    if not text:
+        return ""
+    if parent_name in _LITERAL_TEXT_SERIALIZATION_ELEMENTS:
+        return text
+    return _escape_text(text)
 
 
 def _escape_js_string(value: str, *, quote: str = '"') -> str:
@@ -200,7 +209,7 @@ def _node_to_html_compact(node: Any) -> str:
     stack_pop = stack.pop
 
     void_elements = VOID_ELEMENTS
-    escape_text = _escape_text
+    serialize_text = _serialize_text_for_parent
     serialize_start_tag_ = serialize_start_tag
 
     while stack:
@@ -214,7 +223,9 @@ def _node_to_html_compact(node: Any) -> str:
         if name == "#text":
             data = item.data
             if data:
-                append(escape_text(data))
+                parent = item.parent
+                parent_name = parent.name if parent is not None else None
+                append(serialize_text(data, parent_name))
             continue
 
         if name == "#comment":
@@ -584,12 +595,14 @@ def _node_to_html(node: Any, indent: int = 0, indent_size: int = 2, *, in_pre: b
     # Text node
     if name == "#text":
         text: str | None = node.data
+        parent = node.parent
+        parent_name = parent.name if parent is not None else None
         if not in_pre:
             text = text.strip() if text else ""
             if text:
-                return f"{prefix}{_escape_text(text)}"
+                return f"{prefix}{_serialize_text_for_parent(text, parent_name)}"
             return ""
-        return _escape_text(text) if text else ""
+        return _serialize_text_for_parent(text, parent_name)
 
     # Comment node
     if name == "#comment":
@@ -639,7 +652,7 @@ def _node_to_html(node: Any, indent: int = 0, indent_size: int = 2, *, in_pre: b
             # implicit re-sanitization during rendering.
             text_content = node.to_text(separator="", strip=False)
             text_content = _collapse_html_whitespace(text_content)
-            return f"{prefix}{open_tag}{_escape_text(text_content)}{serialize_end_tag(name)}"
+            return f"{prefix}{open_tag}{_serialize_text_for_parent(text_content, name)}{serialize_end_tag(name)}"
 
     if content_pre:
         inner = "".join(

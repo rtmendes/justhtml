@@ -519,6 +519,24 @@ class TestSerialize(unittest.TestCase):
         script = doc.query("script")[0]
         assert script.to_html(pretty=True) == ("<script>\n  var x = 1;\n\n  var y = 2;\n</script>")
 
+    def test_script_text_round_trip_does_not_escape_raw_text(self):
+        html = "<!DOCTYPE html><html><head><script>var x = 3 > 5 && y > 1;</script></head><body></body></html>"
+        doc = JustHTML(html, strict=True, safe=False)
+
+        assert doc.query("script")[0].to_html(pretty=False) == "<script>var x = 3 > 5 && y > 1;</script>"
+
+        round_tripped = JustHTML(doc.to_html(pretty=False), strict=True, safe=False)
+        assert round_tripped.query("script")[0].children[0].data == "var x = 3 > 5 && y > 1;"
+
+    def test_style_text_round_trip_does_not_escape_raw_text(self):
+        html = '<!DOCTYPE html><html><head><style>body::before { content: "a > b & c"; }</style></head><body></body></html>'
+        doc = JustHTML(html, strict=True, safe=False)
+
+        assert doc.query("style")[0].to_html(pretty=False) == '<style>body::before { content: "a > b & c"; }</style>'
+
+        round_tripped = JustHTML(doc.to_html(pretty=False), strict=True, safe=False)
+        assert round_tripped.query("style")[0].children[0].data == 'body::before { content: "a > b & c"; }'
+
     def test_compact_mode_does_not_normalize_script_text_children(self):
         # Artificial tree to cover serializer branch: skip normalization inside rawtext elements.
         script = Node("script")
