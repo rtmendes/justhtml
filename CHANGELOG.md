@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.1] - 2026-03-10
+
+### Fixed
+- Serialization: Preserve literal text inside `script` and `style` elements during HTML serialization so round-trips do not turn raw text content like `>` or `&` into entity text.
+
 ## [1.9.0] - 2026-03-08
 
 ### Added
