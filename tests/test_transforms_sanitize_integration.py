@@ -66,3 +66,11 @@ class TestTransformsSanitizeIntegration(unittest.TestCase):
             transforms=[Linkify()],
         )
         assert safe_doc.to_html(pretty=False) == '<p><a href="https://example.com">//example.com</a></p>'
+
+    def test_constructor_time_default_sanitization_strips_invisible_unicode(self) -> None:
+        invisible = "\u200b\u202e\ue000"
+        safe_doc = JustHTML(
+            f'<p><a href="java{invisible}script:alert(1)">x{invisible}y</a></p>',
+            fragment=True,
+        )
+        assert safe_doc.to_html(pretty=False) == "<p><a>xy</a></p>"

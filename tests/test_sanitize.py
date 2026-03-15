@@ -38,6 +38,7 @@ class _CoverageSentinel:
 class TestSanitizePlumbing(unittest.TestCase):
     def test_public_api_exports_exist(self) -> None:
         assert isinstance(DEFAULT_POLICY, SanitizationPolicy)
+        assert DEFAULT_POLICY.strip_invisible_unicode is True
         assert "sanitize" not in justhtml.__all__
         assert "Sanitize" in justhtml.__all__
         assert "HTMLContext" in justhtml.__all__
@@ -59,12 +60,14 @@ class TestSanitizePlumbing(unittest.TestCase):
             drop_content_tags=["script", "style"],
             force_link_rel=["noopener"],
             allowed_css_properties=["color"],
+            strip_invisible_unicode=1,
         )
         assert isinstance(policy.allowed_tags, frozenset)
         assert isinstance(policy.allowed_attributes, dict)
         assert isinstance(policy.drop_content_tags, set)
         assert isinstance(policy.force_link_rel, set)
         assert isinstance(policy.allowed_css_properties, set)
+        assert policy.strip_invisible_unicode is True
 
     def test_urlrule_rejects_non_urlproxy_instance(self) -> None:
         with self.assertRaises(TypeError):
@@ -202,6 +205,43 @@ class TestSanitizeDom(unittest.TestCase):
         out = sanitize_dom(root)
         assert out is root
         assert to_html(root, pretty=False) == "<table><caption>Summary</caption></table>"
+
+    def test_sanitize_dom_default_policy_strips_invisible_unicode(self) -> None:
+        variation_selector = "\ufe00"
+        supplementary_variation_selector = "\U000e0100"
+        zero_width = "\u200b"
+        bidi = "\u202e"
+        private_use = "\ue000"
+        root = JustHTML(
+            (
+                f'<p title="a{supplementary_variation_selector}{private_use}{bidi}b">'
+                f"a{variation_selector}{zero_width}{bidi}b"
+                f'<a href="java{zero_width}script:alert(1)">x</a></p>'
+            ),
+            fragment=True,
+            sanitize=False,
+        ).root
+
+        out = sanitize_dom(root)
+        assert out is root
+        assert root.to_html(pretty=False) == '<p title="ab">ab<a>x</a></p>'
+
+    def test_sanitize_dom_leaves_invisible_unicode_when_flag_disabled(self) -> None:
+        invisible = "\ufe00\u200b\u202e\ue000"
+        root = JustHTML(
+            f'<p title="a{invisible}b">a{invisible}b</p>',
+            fragment=True,
+            sanitize=False,
+        ).root
+        policy = SanitizationPolicy(
+            allowed_tags=["p"],
+            allowed_attributes={"p": ["title"]},
+            strip_invisible_unicode=False,
+        )
+
+        out = sanitize_dom(root, policy=policy)
+        assert out is root
+        assert root.to_html(pretty=False) == f'<p title="a{invisible}b">a{invisible}b</p>'
 
     def test_sanitize_dom_compiled_cache_reuse(self) -> None:
         policy = SanitizationPolicy(

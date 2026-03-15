@@ -276,6 +276,7 @@ class SanitizationPolicy:
             force_link_rel: Collection[str] = ...,
             unsafe_handling: UnsafeHandling = "strip",
             disallowed_tag_handling: DisallowedTagHandling = "unwrap",
+            strip_invisible_unicode: bool = True,
         ) -> None: ...
 
     # URL handling.
@@ -313,6 +314,11 @@ class SanitizationPolicy:
     # - "escape": Emit original tag tokens as text, keep/sanitize children.
     # - "drop": Drop the entire disallowed subtree.
     disallowed_tag_handling: DisallowedTagHandling = "unwrap"
+
+    # Strip invisible Unicode commonly abused for obfuscation in text and
+    # attribute values, such as variation selectors, zero-width/bidi controls,
+    # and private-use characters.
+    strip_invisible_unicode: bool = True
 
     _unsafe_handler: UnsafeHandler = field(
         default_factory=lambda: UnsafeHandler("strip"),
@@ -405,6 +411,7 @@ class SanitizationPolicy:
         if disallowed_tag_handling not in {"unwrap", "escape", "drop"}:
             raise ValueError("Invalid disallowed_tag_handling. Expected one of: 'unwrap', 'escape', 'drop'")
         object.__setattr__(self, "disallowed_tag_handling", disallowed_tag_handling)
+        object.__setattr__(self, "strip_invisible_unicode", bool(self.strip_invisible_unicode))
 
         # Centralize unsafe-handling logic so multiple passes can share it.
         handler = UnsafeHandler(cast("UnsafeHandling", unsafe_handling))
@@ -455,6 +462,13 @@ class SanitizationPolicy:
 _URL_NORMALIZE_STRIP_TABLE = {i: None for i in range(0x21)}
 _URL_NORMALIZE_STRIP_TABLE[0x7F] = None
 _URL_NORMALIZE_STRIP_REGEX: re.Pattern[str] = re.compile(r"[\x00-\x20\x7f]")
+
+# Invisible Unicode commonly abused for obfuscation includes zero-width and
+# bidi controls, variation selectors, and private-use characters.
+_INVISIBLE_UNICODE_STRIP_REGEX: re.Pattern[str] = re.compile(
+    r"[\u061C\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFE00-\uFE0F\uFEFF\uE000-\uF8FF"
+    r"\U000E0100-\U000E01EF\U000F0000-\U000FFFFD\U00100000-\U0010FFFD]"
+)
 
 _ATTR_DROP_PATTERNS: tuple[str, ...] = ("on*", "srcdoc", "*:*")
 _ATTR_DROP_REGEX: re.Pattern[str] = re.compile(
@@ -568,6 +582,7 @@ DEFAULT_DOCUMENT_POLICY: SanitizationPolicy = SanitizationPolicy(
     drop_content_tags=DEFAULT_POLICY.drop_content_tags,
     allowed_css_properties=DEFAULT_POLICY.allowed_css_properties,
     force_link_rel=DEFAULT_POLICY.force_link_rel,
+    strip_invisible_unicode=DEFAULT_POLICY.strip_invisible_unicode,
 )
 
 
@@ -886,6 +901,12 @@ def _normalize_url_for_checking(value: str) -> str:
     if not _URL_NORMALIZE_STRIP_REGEX.search(value):
         return value
     return value.translate(_URL_NORMALIZE_STRIP_TABLE)
+
+
+def _strip_invisible_unicode(value: str) -> str:
+    if not _INVISIBLE_UNICODE_STRIP_REGEX.search(value):
+        return value
+    return _INVISIBLE_UNICODE_STRIP_REGEX.sub("", value)
 
 
 def _is_valid_scheme(scheme: str) -> bool:

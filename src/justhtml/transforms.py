@@ -31,6 +31,7 @@ from .sanitize import (
     _sanitize_inline_style,
     _sanitize_srcset_value,
     _sanitize_url_value_with_rule,
+    _strip_invisible_unicode,
 )
 from .selector import SelectorMatcher, parse_selector
 from .serialize import serialize_end_tag, serialize_start_tag
@@ -299,6 +300,13 @@ class _CompiledRewriteAttrsTransform:
     func: EditAttrsCallback
 
 
+@dataclass(frozen=True, slots=True)
+class _CompiledStripInvisibleUnicodeTransform:
+    kind: Literal["strip_invisible_unicode"]
+    callback: NodeCallback | None
+    report: ReportCallback
+
+
 class _CompiledRewriteAttrsChain:
     """Optimized chain of attribute transforms using a flat list instead of nested closures.
 
@@ -413,6 +421,7 @@ CompiledTransform = (
     | _CompiledDecideElementsChain
     | _CompiledRewriteAttrsTransform
     | _CompiledRewriteAttrsChain
+    | _CompiledStripInvisibleUnicodeTransform
     | _CompiledLinkifyTransform
     | _CompiledCollapseWhitespaceTransform
     | _CompiledPruneEmptyTransform
@@ -438,6 +447,19 @@ def _iter_flattened_transforms(specs: list[TransformSpec] | tuple[TransformSpec,
 
     _walk(specs)
     return out
+
+
+def _compile_patterns_to_regex(patterns: tuple[str, ...]) -> re.Pattern[str] | None:
+    if not patterns:
+        return None
+    parts: list[str] = []
+    for p in patterns:
+        regex = re.escape(p)
+        regex = regex.replace(r"\*", ".*")
+        regex = regex.replace(r"\?", ".")
+        parts.append(regex)
+    full = "^(?:" + "|".join(parts) + ")$"
+    return re.compile(full)
 
 
 def _glob_match(pattern: str, text: str) -> bool:
@@ -1403,6 +1425,15 @@ def compile_transforms(transforms: list[TransformSpec] | tuple[TransformSpec, ..
             decide_callbacks.append(_sanitize_node_decision)
             _append_compiled(_CompiledDecideElementsChain(callbacks=decide_callbacks))
 
+            if policy.strip_invisible_unicode:
+                _append_compiled(
+                    _CompiledStripInvisibleUnicodeTransform(
+                        kind="strip_invisible_unicode",
+                        callback=t.callback,
+                        report=_report_unsafe,
+                    )
+                )
+
             # Attributes pipeline (compiled normally so we can reuse fusion logic).
             sub_attrs: list[TransformSpec] = [
                 DropAttrs(
@@ -1468,24 +1499,6 @@ def compile_transforms(transforms: list[TransformSpec] | tuple[TransformSpec, ..
         raise TypeError(f"Unsupported transform: {type(t).__name__}")  # pragma: no cover
 
     return compiled
-
-
-# -----------------
-# Application
-# -----------------
-
-
-def _compile_patterns_to_regex(patterns: tuple[str, ...]) -> re.Pattern[str] | None:
-    if not patterns:
-        return None
-    parts: list[str] = []
-    for p in patterns:
-        regex = re.escape(p)
-        regex = regex.replace(r"\*", ".*")
-        regex = regex.replace(r"\?", ".")
-        parts.append(regex)
-    full = "^(?:" + "|".join(parts) + ")$"
-    return re.compile(full)
 
 
 def apply_compiled_transforms(
@@ -1815,6 +1828,48 @@ def apply_compiled_transforms(
                                         if t.report is not None:
                                             t.report("Collapsed whitespace in text node", node=node)
                                         node.data = collapsed
+                            continue
+
+                        # Strip invisible Unicode variation selectors
+                        if k == "strip_invisible_unicode":
+                            if is_text:
+                                text_data = str(getattr(node, "data", "") or "")
+                                if text_data:
+                                    stripped_text = _strip_invisible_unicode(text_data)
+                                    if stripped_text != text_data:
+                                        if t.callback is not None:
+                                            t.callback(node)
+                                        t.report("Stripped invisible Unicode from text node", node=node)
+                                        node.data = stripped_text
+                                continue
+
+                            if is_special or is_doctype:
+                                continue
+
+                            attrs = node.attrs
+                            if not attrs:
+                                continue
+
+                            changed_keys: list[str] | None = None
+                            for attr_name, raw_value in attrs.items():
+                                if raw_value is None:
+                                    continue
+                                stripped_value = _strip_invisible_unicode(str(raw_value))
+                                if stripped_value == raw_value:
+                                    continue
+                                attrs[attr_name] = stripped_value
+                                if changed_keys is None:
+                                    changed_keys = []
+                                changed_keys.append(attr_name)
+
+                            if changed_keys is not None:
+                                if t.callback is not None:
+                                    t.callback(node)
+                                attrs_list = ", ".join(changed_keys)
+                                t.report(
+                                    f"Stripped invisible Unicode from attribute(s): {attrs_list}",
+                                    node=node,
+                                )
                             continue
 
                         # Linkify
@@ -2235,6 +2290,7 @@ def apply_compiled_transforms(
                     _CompiledDecideElementsChain,
                     _CompiledRewriteAttrsTransform,
                     _CompiledRewriteAttrsChain,
+                    _CompiledStripInvisibleUnicodeTransform,
                     _CompiledLinkifyTransform,
                     _CompiledCollapseWhitespaceTransform,
                     _CompiledDropCommentsTransform,

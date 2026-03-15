@@ -721,6 +721,39 @@ class TestTransforms(unittest.TestCase):
         assert any("Unsafe tag" in e for e in events)
         assert any("Unsafe attribute" in e for e in events)
 
+    def test_sanitize_strip_invisible_unicode_callback_only_and_noop_branches(self) -> None:
+        events: list[str] = []
+
+        def on_node(n: Node) -> None:
+            events.append(str(n.name))
+
+        invisible = "\ufe00\u200b"
+        root = DocumentFragment()
+        p = Element(
+            "p",
+            {
+                "title": f"a{invisible}b",
+                "data-x": f"c{invisible}d",
+                "data-y": "plain",
+                "data-none": None,
+            },
+            "html",
+        )
+        p.append_child(Text(f"x{invisible}y"))
+        p.append_child(Text(""))
+        root.append_child(p)
+
+        policy = SanitizationPolicy(
+            allowed_tags=["p"],
+            allowed_attributes={"p": ["title", "data-x", "data-y", "data-none"]},
+        )
+
+        apply_compiled_transforms(root, compile_transforms([Sanitize(policy=policy, callback=on_node, report=None)]))
+
+        assert root.to_html(pretty=False) == '<p title="ab" data-x="cd" data-y="plain" data-none>xy</p>'
+        assert events.count("#text") == 1
+        assert events.count("p") == 1
+
     def test_decide_unwrap_can_hoist_template_content(self) -> None:
         root = DocumentFragment()
         tpl = Template("template", attrs={}, namespace="html")

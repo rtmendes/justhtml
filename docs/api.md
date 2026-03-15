@@ -486,6 +486,7 @@ Notable options:
 
 - `unsafe_handling`: "strip" (default), "raise", or "collect"
 - `disallowed_tag_handling`: "unwrap" (default), "escape", or "drop"
+- `strip_invisible_unicode`: `True` by default; strips invisible Unicode commonly abused for obfuscation, including variation selectors, zero-width/bidi controls, and private-use characters
 - `url_policy`: controls URL validation and URL handling ("allow", "strip", or "proxy")
 
 ### `UrlPolicy`
