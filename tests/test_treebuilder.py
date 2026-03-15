@@ -7,6 +7,41 @@ from justhtml.treebuilder import InsertionMode, TreeBuilder
 
 
 class TestTreeBuilder(unittest.TestCase):
+    def test_finish_handles_deeply_nested_html_without_recursion(self) -> None:
+        html = "<div>" * 1200 + "x" + "</div>" * 1200
+
+        doc = JustHTML(html, sanitize=False)
+
+        self.assertEqual(doc.to_text(strip=False), "x")
+
+    def test_selectedcontent_population_handles_deep_selected_option(self) -> None:
+        html = (
+            "<select><option selected>"
+            + "<div>" * 1200
+            + "x"
+            + "</div>" * 1200
+            + "</option><selectedcontent></selectedcontent></select>"
+        )
+
+        doc = JustHTML(html, fragment=True, sanitize=False)
+
+        selectedcontent = None
+        stack = [doc.root]
+        while stack:
+            node = stack.pop()
+            if node.name == "selectedcontent":
+                selectedcontent = node
+                break
+            template_content = getattr(node, "template_content", None)
+            if template_content is not None:
+                stack.append(template_content)
+            stack.extend(reversed(getattr(node, "children", None) or []))
+
+        self.assertIsNotNone(selectedcontent)
+        assert selectedcontent is not None
+        self.assertTrue(selectedcontent.children)
+        self.assertEqual(selectedcontent.children[0].name, "div")
+
     def test_null_in_body_text_is_removed(self) -> None:
         doc = JustHTML("<body>a\x00b</body>", collect_errors=True)
         text = doc.to_text(strip=False)

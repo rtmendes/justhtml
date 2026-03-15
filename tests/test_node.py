@@ -838,6 +838,27 @@ class TestNode(unittest.TestCase):
         assert clone.children[0] is not child
         assert clone.children[0].parent is clone
 
+    def test_clone_document_deep_handles_deep_trees_iteratively(self):
+        node = Document()
+        parent = node
+        for _ in range(1200):
+            child = Node("div")
+            parent.append_child(child)
+            parent = child
+        parent.append_child(Text("x"))
+
+        clone = node.clone_node(deep=True)
+
+        assert clone.to_text(strip=False) == "x"
+        current = clone
+        depth = 0
+        while current.children:
+            current = current.children[0]
+            depth += 1
+            if current.name == "#text":
+                break
+        assert depth == 1201
+
     def test_remove_child(self):
         parent = Node("div")
         child = Node("span")

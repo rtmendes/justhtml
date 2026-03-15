@@ -1278,24 +1278,26 @@ class TreeBuilder(TreeBuilderModesMixin):
             self._clone_children(selected_option, selectedcontent)
 
     def _find_elements(self, node: Any, name: str, result: list[Any]) -> None:
-        """Recursively find all elements with given name."""
-        if node.name == name:
-            result.append(node)
+        """Find all elements with given name using iterative preorder traversal."""
+        stack: list[Any] = [node]
+        while stack:
+            current = stack.pop()
+            if current.name == name:
+                result.append(current)
 
-        if node.has_child_nodes():
-            for child in node.children:
-                self._find_elements(child, name, result)
+            if current.has_child_nodes():
+                stack.extend(reversed(current.children))
 
     def _find_element(self, node: Any, name: str) -> Any | None:
-        """Find first element with given name."""
-        if node.name == name:
-            return node
+        """Find first element with given name using iterative preorder traversal."""
+        stack: list[Any] = [node]
+        while stack:
+            current = stack.pop()
+            if current.name == name:
+                return current
 
-        if node.has_child_nodes():
-            for child in node.children:
-                result = self._find_element(child, name)
-                if result:
-                    return result
+            if current.has_child_nodes():
+                stack.extend(reversed(current.children))
         return None
 
     def _clone_children(self, source: Any, target: Any) -> None:

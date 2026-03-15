@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import quote
 
 from .selector import query
@@ -542,9 +542,8 @@ class Node:
         clone._origin_pos = self._origin_pos
         clone._origin_line = self._origin_line
         clone._origin_col = self._origin_col
-        if deep and self.children:
-            for child in self.children:
-                clone.append_child(child.clone_node(deep=True))
+        if deep:
+            return cast("Node", _clone_subtree_iterative(self))
         return clone
 
 
@@ -561,9 +560,8 @@ class Document(Node):
         clone._origin_pos = self._origin_pos
         clone._origin_line = self._origin_line
         clone._origin_col = self._origin_col
-        if deep and self.children:
-            for child in self.children:
-                clone.append_child(child.clone_node(deep=True))
+        if deep:
+            return cast("Document", _clone_subtree_iterative(self))
         return clone
 
 
@@ -580,9 +578,8 @@ class DocumentFragment(Node):
         clone._origin_pos = self._origin_pos
         clone._origin_line = self._origin_line
         clone._origin_col = self._origin_col
-        if deep and self.children:
-            for child in self.children:
-                clone.append_child(child.clone_node(deep=True))
+        if deep:
+            return cast("DocumentFragment", _clone_subtree_iterative(self))
         return clone
 
 
@@ -657,8 +654,7 @@ class Element(Node):
         clone._end_tag_present = self._end_tag_present
         clone._self_closing = self._self_closing
         if deep:
-            for child in self.children:
-                clone.append_child(child.clone_node(deep=True))
+            return cast("Element", _clone_subtree_iterative(self))
         return clone
 
 
@@ -697,11 +693,34 @@ class Template(Element):
         clone._end_tag_present = self._end_tag_present
         clone._self_closing = self._self_closing
         if deep:
-            if self.template_content:
-                clone.template_content = self.template_content.clone_node(deep=True)
-            for child in self.children:
-                clone.append_child(child.clone_node(deep=True))
+            return cast("Template", _clone_subtree_iterative(self))
         return clone
+
+
+def _clone_subtree_iterative(root: Any) -> Any:
+    clone_root = root.clone_node(deep=False)
+    stack: list[tuple[Any, Any]] = [(root, clone_root)]
+
+    while stack:
+        source, target = stack.pop()
+
+        if type(source) is Template and source.template_content is not None:
+            target.template_content = source.template_content.clone_node(deep=False)
+            stack.append((source.template_content, target.template_content))
+
+        children = source.children
+        if not children:
+            continue
+
+        pending: list[tuple[Any, Any]] = []
+        for child in children:
+            child_clone = child.clone_node(deep=False)
+            target.append_child(child_clone)
+            pending.append((child, child_clone))
+
+        stack.extend(reversed(pending))
+
+    return clone_root
 
 
 class Text:
