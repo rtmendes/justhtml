@@ -841,319 +841,277 @@ def _to_markdown_walk(
     in_link: bool = False,
     html_passthrough: bool = False,
 ) -> None:
-    name: str = node.name
+    tasks: list[Any] = [("visit", node, builder, preserve_whitespace, list_depth, in_link)]
 
-    if name == "#text":
-        if preserve_whitespace:
-            builder.raw(node.data or "")
-        else:
-            builder.text(_markdown_escape_text(node.data or ""), preserve_whitespace=False)
-        return
+    while tasks:
+        task = tasks.pop()
+        kind = task[0]
 
-    if name == "br":
-        if in_link:
-            builder.text(" ", preserve_whitespace=False)
-        else:
-            builder.newline(1)
-        return
+        if kind == "visit":
+            current, current_builder, current_preserve, current_list_depth, current_in_link = (
+                task[1],
+                task[2],
+                task[3],
+                task[4],
+                task[5],
+            )
+            name: str = current.name
 
-    # Comments/doctype don't contribute.
-    if name == "#comment" or name == "!doctype":
-        return
+            if name == "#text":
+                if current_preserve:
+                    current_builder.raw(current.data or "")
+                else:
+                    current_builder.text(_markdown_escape_text(current.data or ""), preserve_whitespace=False)
+                continue
 
-    # Document containers contribute via descendants.
-    if name.startswith("#"):
-        if node.children:
-            for child in node.children:
-                _to_markdown_walk(
-                    child,
-                    builder,
-                    preserve_whitespace,
-                    list_depth,
-                    in_link=in_link,
-                    html_passthrough=html_passthrough,
+            if name == "br":
+                if current_in_link:
+                    current_builder.text(" ", preserve_whitespace=False)
+                else:
+                    current_builder.newline(1)
+                continue
+
+            if name == "#comment" or name == "!doctype":
+                continue
+
+            if name.startswith("#"):
+                tasks.extend(
+                    ("visit", child, current_builder, current_preserve, current_list_depth, current_in_link)
+                    for child in reversed(current.children or [])
                 )
-        return
+                continue
 
-    tag = name.lower()
+            tag = name.lower()
 
-    # Metadata containers don't contribute to body text.
-    if tag == "head" or tag == "title":
-        return
+            if tag == "head" or tag == "title":
+                continue
 
-    # Preserve <img>, <table>, and raw-text elements as HTML.
-    if tag == "img":
-        builder.raw(node.to_html(indent=0, indent_size=2, pretty=False))
-        return
+            if tag == "img":
+                current_builder.raw(current.to_html(indent=0, indent_size=2, pretty=False))
+                continue
 
-    if tag in {"table", "script", "style", "textarea"}:
-        if not in_link:
-            builder.ensure_newlines(2 if builder._buf else 0)
-        if tag in {"script", "style", "textarea"}:
-            if not html_passthrough:
-                return
-            builder.raw(f"<{tag}>")
-            content = node.to_text(separator="", strip=False)
-            if content:
-                builder.raw(content)
-            builder.raw(f"</{tag}>")
-        else:
-            builder.raw(node.to_html(indent=0, indent_size=2, pretty=False))
-        if not in_link:
-            builder.ensure_newlines(2)
-        return
+            if tag in {"table", "script", "style", "textarea"}:
+                if not current_in_link:
+                    current_builder.ensure_newlines(2 if current_builder._buf else 0)
+                if tag in {"script", "style", "textarea"}:
+                    if html_passthrough:
+                        current_builder.raw(f"<{tag}>")
+                        content = current.to_text(separator="", strip=False)
+                        if content:
+                            current_builder.raw(content)
+                        current_builder.raw(f"</{tag}>")
+                else:
+                    current_builder.raw(current.to_html(indent=0, indent_size=2, pretty=False))
+                if not current_in_link:
+                    current_builder.ensure_newlines(2)
+                continue
 
-    # Headings.
-    if tag in {"h1", "h2", "h3", "h4", "h5", "h6"}:
-        if not in_link:
-            builder.ensure_newlines(2 if builder._buf else 0)
-            level = int(tag[1])
-            builder.raw("#" * level)
-            builder.raw(" ")
-
-        if node.children:
-            for child in node.children:
-                _to_markdown_walk(
-                    child,
-                    builder,
-                    preserve_whitespace=False,
-                    list_depth=list_depth,
-                    in_link=in_link,
-                    html_passthrough=html_passthrough,
+            if tag in {"h1", "h2", "h3", "h4", "h5", "h6"}:
+                if not current_in_link:
+                    current_builder.ensure_newlines(2 if current_builder._buf else 0)
+                    current_builder.raw("#" * int(tag[1]))
+                    current_builder.raw(" ")
+                tasks.append(("after_heading", current_builder, current_in_link))
+                tasks.extend(
+                    ("visit", child, current_builder, False, current_list_depth, current_in_link)
+                    for child in reversed(current.children or [])
                 )
+                continue
 
-        if not in_link:
-            builder.ensure_newlines(2)
-        return
+            if tag == "hr":
+                if not current_in_link:
+                    current_builder.ensure_newlines(2 if current_builder._buf else 0)
+                    current_builder.raw("---")
+                    current_builder.ensure_newlines(2)
+                continue
 
-    # Horizontal rule.
-    if tag == "hr":
-        if not in_link:
-            builder.ensure_newlines(2 if builder._buf else 0)
-            builder.raw("---")
-            builder.ensure_newlines(2)
-        return
+            if tag == "pre":
+                code = current.to_text(separator="", strip=False)
+                if current_in_link:
+                    current_builder.raw(_markdown_code_span(code))
+                else:
+                    current_builder.ensure_newlines(2 if current_builder._buf else 0)
+                    current_builder.raw("```")
+                    current_builder.newline(1)
+                    if code:
+                        current_builder.raw(code.rstrip("\n"))
+                        current_builder.newline(1)
+                    current_builder.raw("```")
+                    current_builder.ensure_newlines(2)
+                continue
 
-    # Code blocks.
-    if tag == "pre":
-        if not in_link:
-            builder.ensure_newlines(2 if builder._buf else 0)
-            code = node.to_text(separator="", strip=False)
-            builder.raw("```")
-            builder.newline(1)
-            if code:
-                builder.raw(code.rstrip("\n"))
-                builder.newline(1)
-            builder.raw("```")
-            builder.ensure_newlines(2)
-        else:
-            # Inside link, render as inline code or text
-            code = node.to_text(separator="", strip=False)
-            builder.raw(_markdown_code_span(code))
-        return
+            if tag == "code" and not current_preserve:
+                current_builder.raw(_markdown_code_span(current.to_text(separator="", strip=False)))
+                continue
 
-    # Inline code.
-    if tag == "code" and not preserve_whitespace:
-        code = node.to_text(separator="", strip=False)
-        builder.raw(_markdown_code_span(code))
-        return
-
-    # Paragraph-like blocks.
-    if tag == "p":
-        if not in_link:
-            builder.ensure_newlines(2 if builder._buf else 0)
-
-        if node.children:
-            for child in node.children:
-                _to_markdown_walk(
-                    child,
-                    builder,
-                    preserve_whitespace=False,
-                    list_depth=list_depth,
-                    in_link=in_link,
-                    html_passthrough=html_passthrough,
+            if tag == "p":
+                if not current_in_link:
+                    current_builder.ensure_newlines(2 if current_builder._buf else 0)
+                tasks.append(("after_paragraph", current_builder, current_in_link))
+                tasks.extend(
+                    ("visit", child, current_builder, False, current_list_depth, current_in_link)
+                    for child in reversed(current.children or [])
                 )
+                continue
 
-        if not in_link:
-            builder.ensure_newlines(2)
-        else:
-            builder.text(" ", preserve_whitespace=False)
-        return
-
-    # Blockquotes.
-    if tag == "blockquote":
-        if not in_link:
-            builder.ensure_newlines(2 if builder._buf else 0)
-            inner = _MarkdownBuilder()
-            if node.children:
-                for child in node.children:
-                    _to_markdown_walk(
-                        child,
-                        inner,
-                        preserve_whitespace=False,
-                        list_depth=list_depth,
-                        in_link=in_link,
-                        html_passthrough=html_passthrough,
+            if tag == "blockquote":
+                if current_in_link:
+                    tasks.extend(
+                        ("visit", child, current_builder, False, current_list_depth, current_in_link)
+                        for child in reversed(current.children or [])
                     )
-            text = inner.finish()
+                else:
+                    inner_builder = _MarkdownBuilder()
+                    tasks.append(("after_blockquote", current_builder, inner_builder))
+                    tasks.extend(
+                        ("visit", child, inner_builder, False, current_list_depth, current_in_link)
+                        for child in reversed(current.children or [])
+                    )
+                continue
+
+            if tag in {"ul", "ol"}:
+                items = [child for child in current.children or () if child.name.lower() == "li"]
+                if current_in_link:
+                    tasks.extend(
+                        ("flatten_list_item", child, current_builder, current_list_depth, html_passthrough)
+                        for child in reversed(items)
+                    )
+                else:
+                    current_builder.ensure_newlines(2 if current_builder._buf else 0)
+                    ordered = tag == "ol"
+                    tasks.append(("after_list", current_builder))
+                    for index, child in reversed(list(enumerate(items, start=1))):
+                        tasks.append(("visit_list_item", child, current_builder, current_list_depth, ordered, index))
+                        if index != 1:
+                            tasks.append(("list_separator", current_builder))
+                continue
+
+            if tag in {"em", "i"}:
+                inner_builder = _MarkdownBuilder()
+                tasks.append(("after_marker", current_builder, inner_builder, "*"))
+                tasks.extend(
+                    ("visit", child, inner_builder, False, current_list_depth, current_in_link)
+                    for child in reversed(current.children or [])
+                )
+                continue
+
+            if tag in {"strong", "b"}:
+                inner_builder = _MarkdownBuilder()
+                tasks.append(("after_marker", current_builder, inner_builder, "**"))
+                tasks.extend(
+                    ("visit", child, inner_builder, False, current_list_depth, current_in_link)
+                    for child in reversed(current.children or [])
+                )
+                continue
+
+            if tag == "a":
+                href = ""
+                if current.attrs and "href" in current.attrs and current.attrs["href"] is not None:
+                    href = str(current.attrs["href"])
+                inner_builder = _MarkdownBuilder()
+                tasks.append(("after_link", current_builder, inner_builder, href))
+                tasks.extend(
+                    ("visit", child, inner_builder, False, current_list_depth, True)
+                    for child in reversed(current.children or [])
+                )
+                continue
+
+            next_preserve = current_preserve or (tag in {"textarea", "script", "style"})
+            if tag in _MARKDOWN_BLOCK_ELEMENTS:
+                tasks.append(("after_block_container", current_builder, current_in_link))
+            if isinstance(current, Element) and current.template_content:
+                tasks.append(
+                    (
+                        "visit",
+                        current.template_content,
+                        current_builder,
+                        next_preserve,
+                        current_list_depth,
+                        current_in_link,
+                    )
+                )
+            tasks.extend(
+                ("visit", child, current_builder, next_preserve, current_list_depth, current_in_link)
+                for child in reversed(current.children or [])
+            )
+            continue
+
+        if kind == "after_heading":
+            if not task[2]:
+                task[1].ensure_newlines(2)
+            continue
+
+        if kind == "after_paragraph":
+            if task[2]:
+                task[1].text(" ", preserve_whitespace=False)
+            else:
+                task[1].ensure_newlines(2)
+            continue
+
+        if kind == "after_blockquote":
+            parent_builder, inner_builder = task[1], task[2]
+            parent_builder.ensure_newlines(2 if parent_builder._buf else 0)
+            text = inner_builder.finish()
             if text:
-                lines = text.split("\n")
-                for i, line in enumerate(lines):
-                    if i:
-                        builder.newline(1)
-                    builder.raw("> ")
-                    builder.raw(line)
-            builder.ensure_newlines(2)
+                for index, line in enumerate(text.split("\n")):
+                    if index:
+                        parent_builder.newline(1)
+                    parent_builder.raw("> ")
+                    parent_builder.raw(line)
+            parent_builder.ensure_newlines(2)
+            continue
+
+        if kind == "after_list":
+            task[1].ensure_newlines(2)
+            continue
+
+        if kind == "list_separator":
+            task[1].newline(1)
+            continue
+
+        if kind == "visit_list_item":
+            li_node, current_builder, current_list_depth, ordered, index = task[1], task[2], task[3], task[4], task[5]
+            current_builder.raw("  " * current_list_depth)
+            current_builder.raw(f"{index}. " if ordered else "- ")
+            tasks.extend(
+                ("visit", child, current_builder, False, current_list_depth + 1, False)
+                for child in reversed(li_node.children or [])
+            )
+            continue
+
+        if kind == "flatten_list_item":
+            li_node, current_builder, current_list_depth = task[1], task[2], task[3]
+            current_builder.raw(" ")
+            tasks.extend(
+                ("visit", child, current_builder, False, current_list_depth + 1, True)
+                for child in reversed(li_node.children or [])
+            )
+            continue
+
+        if kind == "after_marker":
+            parent_builder, inner_builder, marker = task[1], task[2], task[3]
+            content = inner_builder.finish()
+            if content:
+                parent_builder.raw(marker)
+                parent_builder.raw(content)
+                parent_builder.raw(marker)
+            continue
+
+        if kind == "after_link":
+            parent_builder, inner_builder, href = task[1], task[2], task[3]
+            link_text = inner_builder.finish()
+            parent_builder.raw("[")
+            parent_builder.raw(link_text)
+            parent_builder.raw("]")
+            if href:
+                parent_builder.raw("(")
+                parent_builder.raw(_markdown_link_destination(href))
+                parent_builder.raw(")")
+            continue
+
+        if kind != "after_block_container":  # pragma: no cover
+            raise RuntimeError(f"Unknown markdown task kind: {kind}")
+        if task[2]:
+            task[1].text(" ", preserve_whitespace=False)
         else:
-            if node.children:
-                for child in node.children:
-                    _to_markdown_walk(
-                        child,
-                        builder,
-                        preserve_whitespace=False,
-                        list_depth=list_depth,
-                        in_link=in_link,
-                        html_passthrough=html_passthrough,
-                    )
-        return
-
-    # Lists.
-    if tag in {"ul", "ol"}:
-        if not in_link:
-            builder.ensure_newlines(2 if builder._buf else 0)
-            ordered = tag == "ol"
-            idx = 1
-            for child in node.children or ():
-                if child.name.lower() != "li":
-                    continue
-                if idx > 1:
-                    builder.newline(1)
-                indent = "  " * list_depth
-                marker = f"{idx}. " if ordered else "- "
-                builder.raw(indent)
-                builder.raw(marker)
-                # Render list item content inline-ish.
-                for li_child in child.children or ():
-                    _to_markdown_walk(
-                        li_child,
-                        builder,
-                        preserve_whitespace=False,
-                        list_depth=list_depth + 1,
-                        in_link=in_link,
-                        html_passthrough=html_passthrough,
-                    )
-                idx += 1
-            builder.ensure_newlines(2)
-        else:
-            # Flatten list inside link
-            for child in node.children or ():
-                if child.name.lower() != "li":
-                    continue
-                builder.raw(" ")
-                for li_child in child.children or ():
-                    _to_markdown_walk(
-                        li_child,
-                        builder,
-                        preserve_whitespace=False,
-                        list_depth=list_depth + 1,
-                        in_link=in_link,
-                        html_passthrough=html_passthrough,
-                    )
-        return
-
-    # Emphasis/strong.
-    if tag in {"em", "i"}:
-        inner = _MarkdownBuilder()
-        for child in node.children or ():
-            _to_markdown_walk(
-                child,
-                inner,
-                preserve_whitespace=False,
-                list_depth=list_depth,
-                in_link=in_link,
-                html_passthrough=html_passthrough,
-            )
-        content = inner.finish()
-        if not content:
-            return
-        builder.raw("*")
-        builder.raw(content)
-        builder.raw("*")
-        return
-
-    if tag in {"strong", "b"}:
-        inner = _MarkdownBuilder()
-        for child in node.children or ():
-            _to_markdown_walk(
-                child,
-                inner,
-                preserve_whitespace=False,
-                list_depth=list_depth,
-                in_link=in_link,
-                html_passthrough=html_passthrough,
-            )
-        content = inner.finish()
-        if not content:
-            return
-        builder.raw("**")
-        builder.raw(content)
-        builder.raw("**")
-        return
-
-    # Links.
-    if tag == "a":
-        href = ""
-        if node.attrs and "href" in node.attrs and node.attrs["href"] is not None:
-            href = str(node.attrs["href"])
-
-        # Capture inner text to strip whitespace.
-        inner_builder = _MarkdownBuilder()
-        for child in node.children or ():
-            _to_markdown_walk(
-                child,
-                inner_builder,
-                preserve_whitespace=False,
-                list_depth=list_depth,
-                in_link=True,
-                html_passthrough=html_passthrough,
-            )
-        link_text = inner_builder.finish()
-
-        builder.raw("[")
-        builder.raw(link_text)
-        builder.raw("]")
-        if href:
-            builder.raw("(")
-            builder.raw(_markdown_link_destination(href))
-            builder.raw(")")
-        return
-
-    # Containers / unknown tags: recurse into children.
-    next_preserve = preserve_whitespace or (tag in {"textarea", "script", "style"})
-    if node.children:
-        for child in node.children:
-            _to_markdown_walk(
-                child,
-                builder,
-                next_preserve,
-                list_depth,
-                in_link=in_link,
-                html_passthrough=html_passthrough,
-            )
-
-    if isinstance(node, Element) and node.template_content:
-        _to_markdown_walk(
-            node.template_content,
-            builder,
-            next_preserve,
-            list_depth,
-            in_link=in_link,
-            html_passthrough=html_passthrough,
-        )
-
-    # Add spacing after block containers to keep output readable.
-    if tag in _MARKDOWN_BLOCK_ELEMENTS:
-        if not in_link:
-            builder.ensure_newlines(2)
-        else:
-            builder.text(" ", preserve_whitespace=False)
+            task[1].ensure_newlines(2)

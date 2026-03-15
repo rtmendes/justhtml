@@ -390,6 +390,17 @@ class TestNode(unittest.TestCase):
         root.append_child(script)
         assert root.to_markdown(html_passthrough=True) == "<script>var x = 1;\nvar y = 2;\n</script>"
 
+    def test_to_markdown_handles_deeply_nested_tree_without_recursion(self):
+        root = Node("div")
+        parent = root
+        for _ in range(1200):
+            child = Node("div")
+            parent.append_child(child)
+            parent = child
+        parent.append_child(Text("x"))
+
+        assert root.to_markdown() == "x"
+
     def test_to_markdown_empty_script_still_outputs_tags(self):
         root = Node("div")
         root.append_child(Node("script"))

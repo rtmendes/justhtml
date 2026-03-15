@@ -535,6 +535,31 @@ def _is_layout_blocky_element(node: Any) -> bool:
     return False
 
 
+def _pretty_renders_nonempty(node: Any, *, in_pre: bool) -> bool:
+    stack: list[tuple[Any, bool]] = [(node, in_pre)]
+
+    while stack:
+        current, current_in_pre = stack.pop()
+        name = current.name
+        if name == "#text":
+            data = current.data or ""
+            if data if current_in_pre else data.strip():
+                return True
+            continue
+
+        if name in {"#comment", "!doctype"}:
+            return True
+
+        if name in {"#document", "#document-fragment"}:
+            for child in reversed(current.children or []):
+                stack.append((child, current_in_pre))
+            continue
+
+        return True
+
+    return False
+
+
 def _is_formatting_whitespace_text(data: str) -> bool:
     # Formatting whitespace is something users typically don't intend to preserve
     # exactly (e.g. newlines/indentation, or large runs of spaces).
@@ -578,393 +603,543 @@ def _should_pretty_indent_children(children: list[Any]) -> bool:
 
 
 def _node_to_html(node: Any, indent: int = 0, indent_size: int = 2, *, in_pre: bool) -> str:
-    """Helper to convert a node to HTML."""
-    name: str = node.name
+    """Helper to convert a node to HTML using an explicit stack."""
+    tasks: list[Any] = [("visit", node, indent, in_pre)]
+    results: list[str] = []
 
-    if name == "#document":
-        # Document root - just render children (with newlines in pretty mode).
-        doc_parts: list[str] = []
-        for child in node.children:
-            doc_parts.append(_node_to_html(child, indent, indent_size, in_pre=False))
-        return "\n".join(doc_parts)
+    while tasks:
+        task = tasks.pop()
+        kind = task[0]
 
-    prefix = " " * (indent * indent_size) if not in_pre else ""
-    content_pre = in_pre or name in WHITESPACE_PRESERVING_ELEMENTS
-    newline = "\n" if not content_pre else ""
+        if kind == "visit":
+            current, current_indent, current_in_pre = task[1], task[2], task[3]
+            name: str = current.name
 
-    # Text node
-    if name == "#text":
-        text: str | None = node.data
-        parent = node.parent
-        parent_name = parent.name if parent is not None else None
-        if not in_pre:
-            text = text.strip() if text else ""
-            if text:
-                return f"{prefix}{_serialize_text_for_parent(text, parent_name)}"
-            return ""
-        return _serialize_text_for_parent(text, parent_name)
-
-    # Comment node
-    if name == "#comment":
-        return f"{prefix}<!--{node.data or ''}-->"
-
-    # Doctype
-    if name == "!doctype":
-        return f"{prefix}{_serialize_doctype(node)}"
-
-    # Document fragment
-    if name == "#document-fragment":
-        frag_parts: list[str] = []
-        for child in node.children:
-            child_html = _node_to_html(child, indent, indent_size, in_pre=in_pre)
-            if child_html:
-                frag_parts.append(child_html)
-        return newline.join(frag_parts)
-
-    # Element node
-    open_tag = serialize_start_tag(name, node.attrs)
-
-    # Void elements
-    if name in VOID_ELEMENTS:
-        return f"{prefix}{open_tag}"
-
-    # Elements with children
-    # Template special handling: HTML templates store contents in `template_content`.
-    if name == "template" and node.namespace in {None, "html"} and node.template_content is not None:
-        children: list[Any] = node.template_content.children
-    else:
-        children = node.children
-    if not children:
-        return f"{prefix}{open_tag}{serialize_end_tag(name)}"
-
-    if not content_pre:
-        # Check if all children are text-only (inline rendering)
-        all_text = True
-        for child in children:
-            if child is None:
+            if name == "#document":
+                child_specs = [(child, current_indent, False) for child in current.children if child is not None]
+                tasks.append(("collect_join", "\n", False, child_specs, 0, []))
                 continue
-            if child.name != "#text":
-                all_text = False
-                break
 
-        if all_text:
-            # Serializer controls sanitization at the to_html() entry point; avoid
-            # implicit re-sanitization during rendering.
-            text_content = node.to_text(separator="", strip=False)
-            text_content = _collapse_html_whitespace(text_content)
-            return f"{prefix}{open_tag}{_serialize_text_for_parent(text_content, name)}{serialize_end_tag(name)}"
+            prefix = " " * (current_indent * indent_size) if not current_in_pre else ""
+            content_pre = current_in_pre or name in WHITESPACE_PRESERVING_ELEMENTS
+            newline = "\n" if not content_pre else ""
 
-    if content_pre:
-        inner = "".join(
-            _node_to_html(child, indent + 1, indent_size, in_pre=True) for child in children if child is not None
-        )
-        return f"{prefix}{open_tag}{inner}{serialize_end_tag(name)}"
-
-    if not content_pre and name in SPECIAL_ELEMENTS:
-        # For block-ish containers that only have element children (and/or
-        # whitespace-only text nodes), prefer a multiline layout for readability
-        # even when children are inline elements.
-        can_indent = True
-        for child in children:
-            if child is None:
+            if name == "#text":
+                text: str | None = current.data
+                parent = current.parent
+                parent_name = parent.name if parent is not None else None
+                if not current_in_pre:
+                    text = text.strip() if text else ""
+                    results.append(f"{prefix}{_serialize_text_for_parent(text, parent_name)}" if text else "")
+                else:
+                    results.append(_serialize_text_for_parent(text, parent_name))
                 continue
-            if child.name == "#comment":
-                can_indent = False
-                break
-            if child.name == "#text" and (child.data or "").strip():
-                can_indent = False
-                break
 
-        if can_indent:
-            inner_lines: list[str] = []
-            for child in children:
-                if child is None:
-                    continue
-                if _is_whitespace_text_node(child):
-                    continue
-                child_html = _node_to_html(child, indent + 1, indent_size, in_pre=content_pre)
-                if child_html:
-                    inner_lines.append(child_html)
+            if name == "#comment":
+                results.append(f"{prefix}<!--{current.data or ''}-->")
+                continue
 
-            if inner_lines:
-                parts = [f"{prefix}{open_tag}"]
-                parts.extend(inner_lines)
-                parts.append(f"{prefix}{serialize_end_tag(name)}")
-                return "\n".join(parts)
+            if name == "!doctype":
+                results.append(f"{prefix}{_serialize_doctype(current)}")
+                continue
 
-        # Smart pretty-printing: if the author already inserted formatting whitespace
-        # between siblings, we can split into "inline runs" and put each run on its
-        # own line without introducing new inter-token whitespace.
-        has_comment = any(child is not None and child.name == "#comment" for child in children)
-        if not has_comment:
-            non_none_children: list[Any] = [child for child in children if child is not None]
+            if name == "#document-fragment":
+                child_specs = [
+                    (child, current_indent, current_in_pre) for child in current.children if child is not None
+                ]
+                tasks.append(("collect_join", newline, True, child_specs, 0, []))
+                continue
 
-            # Only enable this mode if there is at least one formatting whitespace text node
-            # between non-whitespace siblings.
-            has_separator = False
-            for child in non_none_children[1:-1]:
-                if child.name != "#text":
-                    continue
-                data = child.data or ""
-                if data.strip() != "":
-                    continue
-                if _is_formatting_whitespace_text(data):
-                    has_separator = True
-                    break
+            open_tag = serialize_start_tag(name, current.attrs)
+            close_tag = serialize_end_tag(name)
 
-            if has_separator:
-                # Build runs by splitting on formatting whitespace text nodes.
-                # Keep small spacing nodes (" " or "  ") inside runs.
-                items: list[Any] = []
-                last_was_sep = False
-                for child in non_none_children:
-                    if child.name == "#text":
-                        data = child.data or ""
-                        if data.strip() == "" and _is_formatting_whitespace_text(data):
-                            if not last_was_sep:
-                                items.append(_FORMAT_SEP)
-                                last_was_sep = True
-                            continue
-                    items.append(child)
-                    last_was_sep = False
+            if name in VOID_ELEMENTS:
+                results.append(f"{prefix}{open_tag}")
+                continue
 
-                while items and items[0] is _FORMAT_SEP:
-                    items.pop(0)
-                while items and items[-1] is _FORMAT_SEP:
-                    items.pop()
+            children: list[Any] = (
+                current.template_content.children
+                if name == "template" and current.namespace in {None, "html"} and current.template_content is not None
+                else current.children
+            )
 
-                runs: list[list[Any]] = []
-                current_run: list[Any] = []
-                for item in items:
-                    if item is _FORMAT_SEP:
-                        runs.append(current_run)
-                        current_run = []
-                        continue
-                    current_run.append(item)
-                runs.append(current_run)
-                runs = [run for run in runs if run]
+            if not children:
+                results.append(f"{prefix}{open_tag}{close_tag}")
+                continue
 
-                # Only apply if we can render each run either as a single blocky element
-                # (possibly multiline) or as a single-line inline run.
-                smart_lines: list[str] = []
-                can_apply = True
-                for run in runs:
-                    blocky_elements = [c for c in run if c.name not in {"#text", "#comment"} and _is_blocky_element(c)]
-                    if blocky_elements and len(run) != 1:
-                        can_apply = False
-                        break
-
-                    if len(run) == 1 and run[0].name != "#text":
-                        child_html = _node_to_html(run[0], indent + 1, indent_size, in_pre=content_pre)
-                        smart_lines.append(child_html)
-                        continue
-
-                    # Inline run: render on one line.
-                    run_parts: list[str] = []
-                    for c in run:
-                        if c.name == "#text":
-                            data = c.data or ""
-                            if not data.strip():
-                                # Formatting whitespace never appears inside runs (it is used as a separator).
-                                # Preserve intentional tiny spacing.
-                                run_parts.append(data)
-                                continue
-
-                            run_parts.append(_escape_text(_normalize_formatting_whitespace(data)))
-                            continue
-
-                        # Render inline elements without their own leading indentation.
-                        child_html = _node_to_html(c, 0, indent_size, in_pre=content_pre)
-                        run_parts.append(child_html)
-
-                    smart_lines.append(f"{' ' * ((indent + 1) * indent_size)}{''.join(run_parts)}")
-
-                if can_apply and smart_lines:
-                    return f"{prefix}{open_tag}\n" + "\n".join(smart_lines) + f"\n{prefix}{serialize_end_tag(name)}"
-
-    if not content_pre and not _should_pretty_indent_children(children):
-        # For block-ish elements that contain only element children and whitespace-only
-        # text nodes, we can still format each child on its own line (only when there
-        # is already whitespace separating element siblings).
-        if name in SPECIAL_ELEMENTS:
-            # Mixed content in block-ish containers: if we encounter a blocky child
-            # (e.g. <ul>) adjacent to inline text, printing everything on one line
-            # both hurts readability and can lose indentation inside the block subtree.
-            # In that case, put inline runs and blocky children on their own lines.
-            has_comment = any(child is not None and child.name == "#comment" for child in children)
-            if not has_comment:
-                has_blocky_child = any(
-                    child is not None and child.name not in {"#text", "#comment"} and _is_layout_blocky_element(child)
-                    for child in children
-                )
-                has_non_whitespace_text = any(
-                    child is not None and child.name == "#text" and (child.data or "").strip() for child in children
-                )
-
-                if has_blocky_child and has_non_whitespace_text:
-                    mixed_multiline_lines: list[str] = []
-                    inline_parts: list[str] = []
-
-                    mixed_first_non_none_index: int | None = None
-                    mixed_last_non_none_index: int | None = None
-                    for i, child in enumerate(children):
-                        if child is None:
-                            continue
-                        if mixed_first_non_none_index is None:
-                            mixed_first_non_none_index = i
-                        mixed_last_non_none_index = i
-
-                    def flush_inline() -> None:
-                        if not inline_parts:
-                            return
-                        line = "".join(inline_parts).strip(" ")
-                        inline_parts.clear()
-                        if line:
-                            mixed_multiline_lines.append(f"{' ' * ((indent + 1) * indent_size)}{line}")
-
-                    for i, child in enumerate(children):
-                        if child is None:
-                            continue
-
-                        if child.name == "#text":
-                            data = child.data or ""
-                            if not data.strip():
-                                # Drop leading/trailing formatting whitespace.
-                                if i == mixed_first_non_none_index or i == mixed_last_non_none_index:
-                                    continue
-                                # Preserve intentional small spacing, but treat formatting whitespace
-                                # as a separator between inline runs (new line).
-                                if "\n" in data or "\r" in data or "\t" in data or len(data) > 2:
-                                    flush_inline()
-                                else:
-                                    inline_parts.append(data)
-                                continue
-
-                            data = _normalize_formatting_whitespace(data)
-                            inline_parts.append(_escape_text(data))
-                            continue
-
-                        if _is_layout_blocky_element(child):
-                            flush_inline()
-                            mixed_multiline_lines.append(
-                                _node_to_html(child, indent + 1, indent_size, in_pre=content_pre)
-                            )
-                            continue
-
-                        # Inline element: keep it in the current line without leading indentation.
-                        inline_parts.append(_node_to_html(child, 0, indent_size, in_pre=content_pre))
-
-                    flush_inline()
-                    inner = "\n".join(line for line in mixed_multiline_lines if line)
-                    return f"{prefix}{open_tag}\n{inner}\n{prefix}{serialize_end_tag(name)}"
-
-            has_comment = False
-            has_element = False
-            has_whitespace_between_elements = False
-
-            first_element_index: int | None = None
-            last_element_index: int | None = None
-
-            previous_was_element = False
-            saw_whitespace_since_last_element = False
-            for i, child in enumerate(children):
-                if child is None:
-                    continue
-                if child.name == "#comment":
-                    has_comment = True
-                    break
-                if child.name == "#text":
-                    # Track whether there is already whitespace between element siblings.
-                    if previous_was_element and not (child.data or "").strip():
-                        saw_whitespace_since_last_element = True
-                    continue
-
-                has_element = True
-                if first_element_index is None:
-                    first_element_index = i
-                last_element_index = i
-                if previous_was_element and saw_whitespace_since_last_element:
-                    has_whitespace_between_elements = True
-                previous_was_element = True
-                saw_whitespace_since_last_element = False
-
-            can_indent_non_whitespace_text = True
-            if has_element and first_element_index is not None and last_element_index is not None:
-                for i, child in enumerate(children):
-                    if child is None or child.name != "#text":
-                        continue
-                    if not (child.data or "").strip():
-                        continue
-                    # Only allow non-whitespace text *after* the last element.
-                    # Leading text or text between elements could gain new spaces
-                    # due to indentation/newlines.
-                    if i < first_element_index or first_element_index < i < last_element_index:
-                        can_indent_non_whitespace_text = False
-                        break
-
-            if has_element and has_whitespace_between_elements and not has_comment and can_indent_non_whitespace_text:
-                element_multiline_lines: list[str] = []
+            if not content_pre:
+                all_text = True
                 for child in children:
                     if child is None:
                         continue
+                    if child.name != "#text":
+                        all_text = False
+                        break
+                if all_text:
+                    text_content = current.to_text(separator="", strip=False)
+                    text_content = _collapse_html_whitespace(text_content)
+                    results.append(f"{prefix}{open_tag}{_serialize_text_for_parent(text_content, name)}{close_tag}")
+                    continue
+
+            if content_pre:
+                child_specs = [(child, current_indent + 1, True) for child in children if child is not None]
+                tasks.append(("collect_wrap_join", prefix, open_tag, close_tag, "", child_specs, 0, []))
+                continue
+
+            if name in SPECIAL_ELEMENTS:
+                can_indent = True
+                for child in children:
+                    if child is None:
+                        continue
+                    if child.name == "#comment" or (child.name == "#text" and (child.data or "").strip()):
+                        can_indent = False
+                        break
+
+                visible_children = [
+                    child
+                    for child in children
+                    if child is not None
+                    and not _is_whitespace_text_node(child)
+                    and _pretty_renders_nonempty(child, in_pre=content_pre)
+                ]
+                if can_indent and visible_children:
+                    child_specs = [(child, current_indent + 1, False) for child in visible_children]
+                    line_templates = [("", [("child", idx)], False) for idx in range(len(child_specs))]
+                    tasks.append(
+                        ("collect_wrap_lines", prefix, open_tag, close_tag, line_templates, True, child_specs, 0, [])
+                    )
+                    continue
+
+                has_comment = any(child is not None and child.name == "#comment" for child in children)
+                if not has_comment:
+                    non_none_children = [child for child in children if child is not None]
+                    has_separator = False
+                    for child in non_none_children[1:-1]:
+                        if child.name != "#text":
+                            continue
+                        data = child.data or ""
+                        if data.strip() == "" and _is_formatting_whitespace_text(data):
+                            has_separator = True
+                            break
+
+                    if has_separator:
+                        items: list[Any] = []
+                        last_was_sep = False
+                        for child in non_none_children:
+                            if child.name == "#text":
+                                data = child.data or ""
+                                if data.strip() == "" and _is_formatting_whitespace_text(data):
+                                    if not last_was_sep:
+                                        items.append(_FORMAT_SEP)
+                                        last_was_sep = True
+                                    continue
+                            items.append(child)
+                            last_was_sep = False
+
+                        while items and items[0] is _FORMAT_SEP:
+                            items.pop(0)
+                        while items and items[-1] is _FORMAT_SEP:
+                            items.pop()
+
+                        runs: list[list[Any]] = []
+                        current_run: list[Any] = []
+                        for item in items:
+                            if item is _FORMAT_SEP:
+                                runs.append(current_run)
+                                current_run = []
+                                continue
+                            current_run.append(item)
+                        runs.append(current_run)
+                        runs = [run for run in runs if run]
+
+                        run_child_specs: list[tuple[Any, int, bool]] = []
+                        run_line_templates: list[tuple[str, list[tuple[str, Any]], bool]] = []
+                        can_apply = True
+                        for run in runs:
+                            blocky_elements = [
+                                child
+                                for child in run
+                                if child.name not in {"#text", "#comment"} and _is_blocky_element(child)
+                            ]
+                            if blocky_elements and len(run) != 1:
+                                can_apply = False
+                                break
+
+                            if len(run) == 1 and run[0].name != "#text":
+                                idx = len(run_child_specs)
+                                run_child_specs.append((run[0], current_indent + 1, False))
+                                run_line_templates.append(("", [("child", idx)], False))
+                                continue
+
+                            parts_template: list[tuple[str, Any]] = []
+                            for child in run:
+                                if child.name == "#text":
+                                    data = child.data or ""
+                                    if not data.strip():
+                                        parts_template.append(("lit", data))
+                                    else:
+                                        parts_template.append(
+                                            ("lit", _escape_text(_normalize_formatting_whitespace(data)))
+                                        )
+                                    continue
+
+                                idx = len(run_child_specs)
+                                run_child_specs.append((child, 0, False))
+                                parts_template.append(("child", idx))
+
+                            run_line_templates.append(
+                                (" " * ((current_indent + 1) * indent_size), parts_template, False)
+                            )
+
+                        if can_apply and run_line_templates:
+                            tasks.append(
+                                (
+                                    "collect_wrap_lines",
+                                    prefix,
+                                    open_tag,
+                                    close_tag,
+                                    run_line_templates,
+                                    True,
+                                    run_child_specs,
+                                    0,
+                                    [],
+                                )
+                            )
+                            continue
+
+            if not _should_pretty_indent_children(children):
+                if name in SPECIAL_ELEMENTS:
+                    has_comment = any(child is not None and child.name == "#comment" for child in children)
+                    if not has_comment:
+                        has_blocky_child = any(
+                            child is not None
+                            and child.name not in {"#text", "#comment"}
+                            and _is_layout_blocky_element(child)
+                            for child in children
+                        )
+                        has_non_whitespace_text = any(
+                            child is not None and child.name == "#text" and (child.data or "").strip()
+                            for child in children
+                        )
+
+                        if has_blocky_child and has_non_whitespace_text:
+                            child_specs = []
+                            mixed_line_templates: list[tuple[str, list[tuple[str, Any]], bool]] = []
+                            inline_parts: list[tuple[str, Any]] = []
+
+                            first_non_none_index = None
+                            last_non_none_index = None
+                            for i, child in enumerate(children):
+                                if child is None:
+                                    continue
+                                if first_non_none_index is None:
+                                    first_non_none_index = i
+                                last_non_none_index = i
+
+                            inline_line_prefix = " " * ((current_indent + 1) * indent_size)
+
+                            def flush_inline_parts(
+                                target_lines: list[tuple[str, list[tuple[str, Any]], bool]] = mixed_line_templates,
+                                line_prefix: str = inline_line_prefix,
+                            ) -> None:
+                                nonlocal inline_parts
+                                if inline_parts:
+                                    target_lines.append((line_prefix, inline_parts, True))
+                                    inline_parts = []
+
+                            for i, child in enumerate(children):
+                                if child is None:
+                                    continue
+
+                                if child.name == "#text":
+                                    data = child.data or ""
+                                    if not data.strip():
+                                        if i == first_non_none_index or i == last_non_none_index:
+                                            continue
+                                        if "\n" in data or "\r" in data or "\t" in data or len(data) > 2:
+                                            flush_inline_parts()
+                                        else:
+                                            inline_parts.append(("lit", data))
+                                        continue
+
+                                    inline_parts.append(("lit", _escape_text(_normalize_formatting_whitespace(data))))
+                                    continue
+
+                                if _is_layout_blocky_element(child):
+                                    flush_inline_parts()
+                                    idx = len(child_specs)
+                                    child_specs.append((child, current_indent + 1, False))
+                                    mixed_line_templates.append(("", [("child", idx)], False))
+                                    continue
+
+                                idx = len(child_specs)
+                                child_specs.append((child, 0, False))
+                                inline_parts.append(("child", idx))
+
+                            flush_inline_parts()
+
+                            if mixed_line_templates:  # pragma: no branch
+                                tasks.append(
+                                    (
+                                        "collect_wrap_lines",
+                                        prefix,
+                                        open_tag,
+                                        close_tag,
+                                        mixed_line_templates,
+                                        True,
+                                        child_specs,
+                                        0,
+                                        [],
+                                    )
+                                )
+                                continue
+
+                    has_comment = False
+                    has_element = False
+                    has_whitespace_between_elements = False
+                    first_element_index = None
+                    last_element_index = None
+                    previous_was_element = False
+                    saw_whitespace_since_last_element = False
+                    for i, child in enumerate(children):
+                        if child is None:
+                            continue
+                        if child.name == "#comment":
+                            has_comment = True
+                            break
+                        if child.name == "#text":
+                            if previous_was_element and not (child.data or "").strip():
+                                saw_whitespace_since_last_element = True
+                            continue
+
+                        has_element = True
+                        if first_element_index is None:
+                            first_element_index = i
+                        last_element_index = i
+                        if previous_was_element and saw_whitespace_since_last_element:
+                            has_whitespace_between_elements = True
+                        previous_was_element = True
+                        saw_whitespace_since_last_element = False
+
+                    can_indent_non_whitespace_text = True
+                    if has_element and first_element_index is not None and last_element_index is not None:
+                        for i, child in enumerate(children):
+                            if child is None or child.name != "#text" or not (child.data or "").strip():
+                                continue
+                            if i < first_element_index or first_element_index < i < last_element_index:
+                                can_indent_non_whitespace_text = False
+                                break
+
+                    if (
+                        has_element
+                        and has_whitespace_between_elements
+                        and not has_comment
+                        and can_indent_non_whitespace_text
+                    ):
+                        child_specs = []
+                        element_line_templates: list[tuple[str, list[tuple[str, Any]], bool]] = []
+                        for child in children:
+                            if child is None:
+                                continue
+                            if child.name == "#text":
+                                text = _collapse_html_whitespace(child.data or "")
+                                if text:
+                                    element_line_templates.append(
+                                        (
+                                            " " * ((current_indent + 1) * indent_size),
+                                            [("lit", _escape_text(text))],
+                                            False,
+                                        )
+                                    )
+                                continue
+                            if not _pretty_renders_nonempty(child, in_pre=content_pre):
+                                continue
+                            idx = len(child_specs)
+                            child_specs.append((child, current_indent + 1, False))
+                            element_line_templates.append(("", [("child", idx)], False))
+
+                        if element_line_templates:
+                            tasks.append(
+                                (
+                                    "collect_wrap_lines",
+                                    prefix,
+                                    open_tag,
+                                    close_tag,
+                                    element_line_templates,
+                                    True,
+                                    child_specs,
+                                    0,
+                                    [],
+                                )
+                            )
+                            continue
+
+                child_specs = []
+                compact_parts_template: list[tuple[str, Any]] = []
+                first_non_none_index = None
+                last_non_none_index = None
+                for i, child in enumerate(children):
+                    if child is None:
+                        continue
+                    if first_non_none_index is None:
+                        first_non_none_index = i
+                    last_non_none_index = i
+
+                for i, child in enumerate(children):
+                    if child is None:
+                        continue
                     if child.name == "#text":
-                        text = _collapse_html_whitespace(child.data or "")
-                        if text:
-                            element_multiline_lines.append(f"{' ' * ((indent + 1) * indent_size)}{_escape_text(text)}")
+                        data = child.data or ""
+                        if not data.strip():
+                            if i == first_non_none_index or i == last_non_none_index:
+                                continue
+                            if "\n" in data or "\r" in data or "\t" in data or len(data) > 2:
+                                compact_parts_template.append(("lit", " "))
+                                continue
+                        data = _normalize_formatting_whitespace(data)
+                        compact_parts_template.append(("lit", _escape_text(data)))
                         continue
-                    child_html = _node_to_html(child, indent + 1, indent_size, in_pre=content_pre)
-                    if child_html:
-                        element_multiline_lines.append(child_html)
-                if element_multiline_lines:
-                    inner = "\n".join(element_multiline_lines)
-                    return f"{prefix}{open_tag}\n{inner}\n{prefix}{serialize_end_tag(name)}"
 
-        inner_parts: list[str] = []
+                    idx = len(child_specs)
+                    child_specs.append((child, 0, False))
+                    compact_parts_template.append(("child", idx))
 
-        compact_first_non_none_index: int | None = None
-        compact_last_non_none_index: int | None = None
-        for i, child in enumerate(children):
-            if child is None:
-                continue
-            if compact_first_non_none_index is None:
-                compact_first_non_none_index = i
-            compact_last_non_none_index = i
-
-        for i, child in enumerate(children):
-            if child is None:
+                tasks.append(
+                    ("collect_wrap_parts", prefix, open_tag, close_tag, compact_parts_template, child_specs, 0, [])
+                )
                 continue
 
-            if child.name == "#text":
-                data = child.data or ""
-                if not data.strip():
-                    # Drop leading/trailing formatting whitespace in compact mode.
-                    if i == compact_first_non_none_index or i == compact_last_non_none_index:
-                        continue
-                    # Preserve intentional small spacing, but collapse large formatting gaps.
-                    if "\n" in data or "\r" in data or "\t" in data or len(data) > 2:
-                        inner_parts.append(" ")
-                        continue
-
-                data = _normalize_formatting_whitespace(data)
-                child_html = _escape_text(data) if data else ""
-            else:
-                # Even when we can't safely insert whitespace *between* siblings, we can
-                # still pretty-print each element subtree to improve readability.
-                child_html = _node_to_html(child, 0, indent_size, in_pre=content_pre)
-            if child_html:
-                inner_parts.append(child_html)
-
-        return f"{prefix}{open_tag}{''.join(inner_parts)}{serialize_end_tag(name)}"
-
-    # Render with child indentation
-    parts = [f"{prefix}{open_tag}"]
-    for child in children:
-        if not content_pre and _is_whitespace_text_node(child):
+            child_specs = [
+                (child, current_indent + 1, content_pre)
+                for child in children
+                if child is not None and (content_pre or not _is_whitespace_text_node(child))
+            ]
+            line_templates = [("", [("child", idx)], False) for idx in range(len(child_specs))]
+            tasks.append(
+                ("collect_wrap_lines", prefix, open_tag, close_tag, line_templates, False, child_specs, 0, [])
+            )
             continue
-        child_html = _node_to_html(child, indent + 1, indent_size, in_pre=content_pre)
-        parts.append(child_html)
-    parts.append(f"{prefix}{serialize_end_tag(name)}")
-    return newline.join(parts)
+
+        if kind == "collect_join":
+            sep, filter_empty, child_specs, index, child_results = task[1], task[2], task[3], task[4], task[5]
+            if index:
+                child_results.append(results.pop())
+            if index < len(child_specs):
+                child, child_indent, child_in_pre = child_specs[index]
+                tasks.append(("collect_join", sep, filter_empty, child_specs, index + 1, child_results))
+                tasks.append(("visit", child, child_indent, child_in_pre))
+                continue
+            if filter_empty:
+                child_results = [value for value in child_results if value]
+            results.append(sep.join(child_results))
+            continue
+
+        if kind == "collect_wrap_join":
+            prefix, open_tag, close_tag, sep, child_specs, index, child_results = (
+                task[1],
+                task[2],
+                task[3],
+                task[4],
+                task[5],
+                task[6],
+                task[7],
+            )
+            if index:
+                child_results.append(results.pop())
+            if index < len(child_specs):
+                child, child_indent, child_in_pre = child_specs[index]
+                tasks.append(
+                    ("collect_wrap_join", prefix, open_tag, close_tag, sep, child_specs, index + 1, child_results)
+                )
+                tasks.append(("visit", child, child_indent, child_in_pre))
+                continue
+            results.append(f"{prefix}{open_tag}{sep.join(child_results)}{close_tag}")
+            continue
+
+        if kind == "collect_wrap_parts":
+            prefix, open_tag, close_tag, parts_template, child_specs, index, child_results = (
+                task[1],
+                task[2],
+                task[3],
+                task[4],
+                task[5],
+                task[6],
+                task[7],
+            )
+            if index:
+                child_results.append(results.pop())
+            if index < len(child_specs):
+                child, child_indent, child_in_pre = child_specs[index]
+                tasks.append(
+                    (
+                        "collect_wrap_parts",
+                        prefix,
+                        open_tag,
+                        close_tag,
+                        parts_template,
+                        child_specs,
+                        index + 1,
+                        child_results,
+                    )
+                )
+                tasks.append(("visit", child, child_indent, child_in_pre))
+                continue
+            parts: list[str] = []
+            for part_kind, value in parts_template:
+                if part_kind == "lit":
+                    parts.append(value)
+                else:
+                    parts.append(child_results[value])
+            results.append(f"{prefix}{open_tag}{''.join(parts)}{close_tag}")
+            continue
+
+        if kind != "collect_wrap_lines":  # pragma: no cover
+            raise RuntimeError(f"Unknown serialization task kind: {kind}")
+        prefix, open_tag, close_tag, line_templates, skip_empty, child_specs, index, child_results = (
+            task[1],
+            task[2],
+            task[3],
+            task[4],
+            task[5],
+            task[6],
+            task[7],
+            task[8],
+        )
+        if index:
+            child_results.append(results.pop())
+        if index < len(child_specs):
+            child, child_indent, child_in_pre = child_specs[index]
+            tasks.append(
+                (
+                    "collect_wrap_lines",
+                    prefix,
+                    open_tag,
+                    close_tag,
+                    line_templates,
+                    skip_empty,
+                    child_specs,
+                    index + 1,
+                    child_results,
+                )
+            )
+            tasks.append(("visit", child, child_indent, child_in_pre))
+            continue
+        lines: list[str] = []
+        for line_prefix, parts_template, strip_spaces in line_templates:
+            line_parts: list[str] = []
+            for part_kind, value in parts_template:
+                if part_kind == "lit":
+                    line_parts.append(value)
+                else:
+                    line_parts.append(child_results[value])
+            line = "".join(line_parts)
+            if strip_spaces:
+                line = line.strip(" ")
+            if line or not skip_empty:
+                lines.append(f"{line_prefix}{line}")
+        results.append("\n".join([f"{prefix}{open_tag}", *lines, f"{prefix}{close_tag}"]))
+
+    return results[-1] if results else ""
 
 
 def to_test_format(node: Any, indent: int = 0) -> str:

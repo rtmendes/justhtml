@@ -110,6 +110,21 @@ class TestSerialize(unittest.TestCase):
         assert "<p>" in out
         assert out.index("<template>") < out.index("<p>") < out.index("</template>")
 
+    def test_pretty_serialization_handles_deeply_nested_tree_without_recursion(self):
+        root = Node("div")
+        parent = root
+        for _ in range(1200):
+            child = Node("div")
+            parent.append_child(child)
+            parent = child
+        parent.append_child(Text("x"))
+
+        output = to_html(root, pretty=True)
+
+        assert output.startswith("<div>")
+        assert output.endswith("</div>")
+        assert "x" in output
+
     def test_collapse_html_whitespace_vertical_tab(self):
         # \v is not HTML whitespace, so it should be preserved as a non-whitespace character
         # while surrounding whitespace is collapsed.
