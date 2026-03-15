@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.10.0] - Unreleased
+
+### Security
+- (Severity: Low) Harden JustHTML against denial-of-service from attacker-controlled deeply nested HTML. Parsing post-processing, deep cloning, pretty HTML serialization, and Markdown rendering now use iterative traversal instead of recursion, preventing `RecursionError` crashes on pathological nesting.
+
 ## [1.9.1] - 2026-03-10
 
 ### Fixed
