@@ -7,7 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.10.0] - Unreleased
+## [1.11.0] - Unreleased
+
+### Added
+- Sanitization: Add `SanitizationPolicy.strip_invisible_unicode` to strip invisible Unicode used for obfuscation from text and attribute values before other sanitizer checks run.
+
+### Changed
+- Sanitization: `strip_invisible_unicode` is enabled by default and covers variation selectors, zero-width/bidi controls, and private-use characters.
+
+### Security
+- (Severity: Low) Harden sanitization against invisible-Unicode obfuscation in text, attributes, and URL-like values such as disguised `javascript:` schemes.
+
+## [1.10.0] - 2026-03-15
 
 ### Security
 - (Severity: Low) Harden JustHTML against denial-of-service from attacker-controlled deeply nested HTML. Parsing post-processing, deep cloning, pretty HTML serialization, and Markdown rendering now use iterative traversal instead of recursion, preventing `RecursionError` crashes on pathological nesting.
