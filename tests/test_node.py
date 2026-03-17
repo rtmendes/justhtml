@@ -422,10 +422,22 @@ class TestNode(unittest.TestCase):
         t = Text("a*b")
         assert t.to_markdown() == "a\\*b"
 
+    def test_to_markdown_textnode_escapes_html_significant_chars(self):
+        t = Text("a < b & c")
+        assert t.to_markdown() == "a &lt; b &amp; c"
+
     def test_to_markdown_empty_textnode(self):
         # Exercises empty-string handling in markdown helpers and builder.
         t = Text("")
         assert t.to_markdown() == ""
+
+    def test_to_markdown_escapes_html_like_text(self):
+        doc = JustHTML("<p>&lt;img src=x onerror=alert(1)&gt;</p>", fragment=True)
+        assert doc.to_markdown() == "&lt;img src=x onerror=alert(1)>"
+
+    def test_to_markdown_escapes_rawtext_content_from_title(self):
+        doc = JustHTML("<title><script>alert(1)</script></title>", fragment=True)
+        assert doc.to_markdown() == "&lt;script>alert(1)&lt;/script>"
 
     def test_to_markdown_ignores_empty_inline_formatting(self):
         root = Node("div")

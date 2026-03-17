@@ -63,6 +63,7 @@ echo '</b>' | justhtml - --strict --fragment
 Notes:
 
 - `markdown` keeps tables (`<table>`) and images (`<img>`) as raw HTML.
+- With the default sanitization on, that raw HTML comes from the sanitized DOM. Use `--format text` if you need output with no HTML at all.
 - For multiple matches:
   - `html` and `text` print one result per line.
   - `markdown` prints matches separated by a blank line.

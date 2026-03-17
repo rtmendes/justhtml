@@ -69,11 +69,11 @@ class TestWikipedia(unittest.TestCase):
         # Verify footer links are present and have correct URLs
         expected_links = [
             "[Wikiquote Free quote compendium](https://www.wikiquote.org/)",
-            "[MediaWiki Free & open wiki software](https://www.mediawiki.org/)",
+            "[MediaWiki Free &amp; open wiki software](https://www.mediawiki.org/)",
             "[Wikisource Free content library](https://www.wikisource.org/)",
             "[Wikispecies Free species directory](https://species.wikimedia.org/)",
             "[Wikifunctions Free function library](https://www.wikifunctions.org/)",
-            "[Meta-Wiki Community coordination & documentation](https://meta.wikimedia.org/)",
+            "[Meta-Wiki Community coordination &amp; documentation](https://meta.wikimedia.org/)",
         ]
         for link in expected_links:
             self.assertIn(link, md)

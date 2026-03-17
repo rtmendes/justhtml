@@ -14,10 +14,16 @@ if TYPE_CHECKING:
 def _markdown_escape_text(s: str) -> str:
     if not s:
         return ""
-    # Pragmatic: escape the few characters that commonly change Markdown meaning.
-    # Keep this minimal to preserve readability.
+    # Escape Markdown syntax and HTML-significant characters so text content
+    # cannot turn into raw HTML when rendered from Markdown.
     out: list[str] = []
     for ch in s:
+        if ch == "&":
+            out.append("&amp;")
+            continue
+        if ch == "<":
+            out.append("&lt;")
+            continue
         if ch in "\\`*_[]":
             out.append("\\")
         out.append(ch)

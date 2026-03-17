@@ -94,6 +94,7 @@ print(doc.to_text(separator="\n", separator_blocks_only=True))
 - Keeps tables (`<table>`) and images (`<img>`) as raw HTML.
 - Drops `<script>`, `<style>`, and `<textarea>` by default; pass
   `html_passthrough=True` to include them and their contents.
+- When the document was built with `JustHTML(..., sanitize=True)` (the default), the Markdown is generated from the sanitized DOM. It may still include sanitized raw HTML for tables and images.
 
 ```python
 from justhtml import JustHTML
@@ -143,4 +144,5 @@ code block
 
 ## Which should I use?
 - Use `to_text()` for the raw concatenated text of a subtree (textContent semantics).
-- Use `to_markdown()` when you want readable, structured Markdown.
+- Use `to_markdown()` when you want readable, structured Markdown from the sanitized DOM.
+- Use `to_text()` when you need plain text with no HTML in the output.

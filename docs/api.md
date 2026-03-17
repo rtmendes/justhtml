@@ -192,7 +192,7 @@ doc.to_markdown()  # => # Title
 doc.to_markdown(html_passthrough=True)
 ```
 
-Sanitization happens at construction time. Use `JustHTML(..., sanitize=False)` for trusted input or `JustHTML(..., policy=...)` to customize the policy.
+Sanitization happens at construction time. `JustHTML(..., sanitize=True)` (the default) makes the DOM safe before Markdown serialization runs. Markdown output may still contain sanitized raw HTML for elements such as tables and images, so use `to_text()` instead if you need plain text with no HTML output at all. Use `JustHTML(..., sanitize=False)` only for trusted input, or `JustHTML(..., policy=...)` to customize the policy.
 
 #### `query(selector)`
 
@@ -400,6 +400,7 @@ node.to_markdown(html_passthrough=True)
 ```
 
 Markdown output is safe-by-default when you build documents with `JustHTML(..., sanitize=True)` (the default). Use `sanitize=False` at construction for trusted input.
+It may still include sanitized raw HTML for elements such as tables and images. Use `to_text()` if you need plain text output with no HTML.
 
 #### `append_child(node)`
 
